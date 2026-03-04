@@ -29,46 +29,36 @@ const LIMITS = {
 };
 
 const FIELD_COLORS = [
-  { hex: 0x3B82F6, css: "#3B82F6" },
-  { hex: 0x10B981, css: "#10B981" },
-  { hex: 0xF59E0B, css: "#F59E0B" },
-  { hex: 0xA855F7, css: "#A855F7" },
-  { hex: 0xEF4444, css: "#EF4444" },
-  { hex: 0x06B6D4, css: "#06B6D4" },
-  { hex: 0xEC4899, css: "#EC4899" },
-  { hex: 0xF97316, css: "#F97316" },
+  { hex: 0x3B82F6, css: "#3B82F6" }, { hex: 0x10B981, css: "#10B981" },
+  { hex: 0xF59E0B, css: "#F59E0B" }, { hex: 0xA855F7, css: "#A855F7" },
+  { hex: 0xEF4444, css: "#EF4444" }, { hex: 0x06B6D4, css: "#06B6D4" },
+  { hex: 0xEC4899, css: "#EC4899" }, { hex: 0xF97316, css: "#F97316" },
 ];
 const COL_RED = { hex: 0xEF4444, css: "#EF4444" };
 const COL_WARN = { hex: 0xF59E0B, css: "#F59E0B" };
 
 /* ═══════════════════════════════════════════════════════════════════ */
-function rotZ(deg) {
-  const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
-  return ([x, y, z]) => [c*x - s*y, s*x + c*y, z];
-}
-function rotY(deg) {
-  const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
-  return ([x, y, z]) => [c*x + s*z, y, -s*x + c*z];
-}
+function rotZ(deg) { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return ([x, y, z]) => [c*x - s*y, s*x + c*y, z]; }
+function rotY(deg) { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return ([x, y, z]) => [c*x + s*z, y, -s*x + c*z]; }
+
 function getHeadPoints(gDeg) {
   const pts = [];
   for (let f = 0; f <= 1; f += 0.2) {
     const r = HEAD_R1 + (HEAD_R2 - HEAD_R1) * f, y = CLEARANCE + HEAD_H * f;
-    for (let a = 0; a < 360; a += 20)
-      pts.push([r * Math.cos(a * Math.PI / 180), y, r * Math.sin(a * Math.PI / 180)]);
+    for (let a = 0; a < 360; a += 20) pts.push([r * Math.cos(a * Math.PI / 180), y, r * Math.sin(a * Math.PI / 180)]);
   }
   return pts.map(rotZ(gDeg));
 }
+
 function checkCollision(g, lat, lng, vert, rm, prx, pry, plen) {
   const headPts = getHeadPoints(g);
   const ytop = -C_YOFF + vert, couchZ = -lng;
   let dc = Infinity, dp = Infinity, ds = Infinity;
   const inv = rotY(-rm);
+  
   for (const pt of headPts) {
     const [nx, ny, nz] = inv([pt[0] - lat, pt[1] - ytop, pt[2] - couchZ]);
-    const dx = Math.max(-CW/2 - nx, 0, nx - CW/2);
-    const dy = Math.max(-CT - ny, 0, ny);
-    const dz = Math.max(COUCH_Z_MIN - nz, 0, nz - COUCH_Z_MAX);
+    const dx = Math.max(-CW/2 - nx, 0, nx - CW/2), dy = Math.max(-CT - ny, 0, ny), dz = Math.max(COUCH_Z_MIN - nz, 0, nz - COUCH_Z_MAX);
     const dM = (dx === 0 && dy === 0 && dz === 0) ? -1 : Math.sqrt(dx*dx + dy*dy + dz*dz);
     if (dM < dc) dc = dM;
     if (plen > 0 && prx > 0 && pry > 0) {
@@ -87,7 +77,9 @@ function checkCollision(g, lat, lng, vert, rm, prx, pry, plen) {
   const dm = Math.min(dc, dp, ds);
   return { dc, dp, ds, dm, st: dm <= 0 ? "col" : dm <= 3 ? "warn" : "ok" };
 }
+
 function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)); }
+function parseF(val) { const n = parseFloat(val); return isNaN(n) ? 0 : n; }
 
 /* ═══════════════════════════════════════════════════════════════════
    COMPONENT
@@ -95,7 +87,17 @@ function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)); }
 export default function LinacCollisionGuard() {
   const mountRef = useRef(null);
   const S = useRef({ renderer: null, scene: null, camera: null, anim: null, refs: {} });
-  const camR = useRef({ theta: 0.6, phi: 0.3, dist: 380 });
+  
+  // Responsive State
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 800);
+    handleResize(); // Init
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const camR = useRef({ theta: 0.6, phi: 0.3, dist: isMobile ? 500 : 380 });
   const dragR = useRef({ on: false, x: 0, y: 0 });
 
   const [ready, setReady] = useState(false);
@@ -110,24 +112,27 @@ export default function LinacCollisionGuard() {
   const [activeField, setActiveField] = useState(null);
   const nextId = useRef(10);
 
-  /* ── AUTO-EVALUATE via useMemo ── */
+  /* ── AUTO-EVALUATE ── */
   const results = useMemo(() => {
-    const prx = patient.show ? patient.rx : 0;
-    const pry = patient.show ? patient.ry : 0;
-    const plen = patient.show ? patient.len : 0;
+    const prx = patient.show ? parseF(patient.rx) : 0;
+    const pry = patient.show ? parseF(patient.ry) : 0;
+    const plen = patient.show ? parseF(patient.len) : 0;
+    const iLat = parseF(iso.lat), iLng = parseF(iso.lng), iVert = parseF(iso.vert);
+
     if (mode === "static") {
-      return beams.map(b => ({ id: b.id, g: b.g, rm: b.rm,
-        ...checkCollision(b.g, iso.lat, iso.lng, iso.vert, b.rm, prx, pry, plen) }));
+      return beams.map(b => ({ id: b.id, g: parseF(b.g), rm: parseF(b.rm),
+        ...checkCollision(parseF(b.g), iLat, iLng, iVert, parseF(b.rm), prx, pry, plen) }));
     } else {
       return arcs.map(a => {
         let minDm = Infinity, worst = "ok", minDc = Infinity, minDp = Infinity;
+        const start = parseF(a.s), end = parseF(a.e), rMesa = parseF(a.rm);
         for (let i = 0; i <= 40; i++) {
-          const deg = a.s + (((a.e - a.s) % 360 + 360) % 360 || 360) * (i / 40);
-          const r = checkCollision(deg, iso.lat, iso.lng, iso.vert, a.rm, prx, pry, plen);
+          const deg = start + (((end - start) % 360 + 360) % 360 || 360) * (i / 40);
+          const r = checkCollision(deg, iLat, iLng, iVert, rMesa, prx, pry, plen);
           if (r.dm < minDm) minDm = r.dm; if (r.dc < minDc) minDc = r.dc; if (r.dp < minDp) minDp = r.dp;
           if (r.st === "col") worst = "col"; else if (r.st === "warn" && worst !== "col") worst = "warn";
         }
-        return { id: a.id, s: a.s, e: a.e, rm: a.rm, dm: minDm, dc: minDc, dp: minDp, st: worst };
+        return { id: a.id, s: start, e: end, rm: rMesa, dm: minDm, dc: minDc, dp: minDp, st: worst };
       });
     }
   }, [beams, arcs, mode, iso, patient]);
@@ -155,27 +160,22 @@ export default function LinacCollisionGuard() {
       const mat = (c, op = 1, ro = 0.5) => new THREE.MeshStandardMaterial({ color: c, transparent: op < 1, opacity: op, roughness: ro, metalness: 0.1, side: THREE.DoubleSide });
       const R = S.current.refs;
 
-      // Stand
       const stand = new THREE.Mesh(new THREE.BoxGeometry(160, 240, 60), mat(0x1E2433)); stand.position.set(0, 20, STAND_Z - 30); scene.add(stand);
 
-      // Gantry
       R.gantryGrp = new THREE.Group();
       const rotor = new THREE.Mesh(new THREE.CylinderGeometry(62, 62, 42, 48), mat(0x222838)); rotor.rotation.x = Math.PI/2; rotor.position.z = STAND_Z; R.gantryGrp.add(rotor);
       const ring = new THREE.Mesh(new THREE.TorusGeometry(62, 2, 16, 48), new THREE.MeshStandardMaterial({ color: 0x3B82F6, emissive: 0x1D4ED8, emissiveIntensity: 0.3 }));
       ring.position.z = STAND_Z + 22; R.gantryGrp.add(ring);
       const arm = new THREE.Mesh(new THREE.BoxGeometry(46, 80, Math.abs(STAND_Z)), mat(0x2A3044)); arm.position.set(0, CLEARANCE + HEAD_H + 40, STAND_Z / 2); R.gantryGrp.add(arm);
-      R.headMesh = new THREE.Mesh(new THREE.CylinderGeometry(HEAD_R2, HEAD_R1, HEAD_H, 48),
-        new THREE.MeshStandardMaterial({ color: 0x3B82F6, roughness: 0.15, metalness: 0.6, emissive: 0x1a3a6a, emissiveIntensity: 0.15 }));
+      R.headMesh = new THREE.Mesh(new THREE.CylinderGeometry(HEAD_R2, HEAD_R1, HEAD_H, 48), new THREE.MeshStandardMaterial({ color: 0x3B82F6, roughness: 0.15, metalness: 0.6, emissive: 0x1a3a6a, emissiveIntensity: 0.15 }));
       R.headMesh.position.set(0, CLEARANCE + HEAD_H / 2, 0); R.gantryGrp.add(R.headMesh);
       scene.add(R.gantryGrp);
 
-      // Couch
       R.couchGrp = new THREE.Group();
       R.couchGrp.add(new THREE.Mesh(new THREE.BoxGeometry(CW, CT, COUCH_Z_MAX - COUCH_Z_MIN), mat(0x1A1F2E, 0.92, 0.25)).translateZ((COUCH_Z_MAX + COUCH_Z_MIN) / 2));
       for (const s of [-1, 1]) { const rl = new THREE.Mesh(new THREE.BoxGeometry(2, 2, COUCH_Z_MAX - COUCH_Z_MIN), new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8, roughness: 0.2 })); rl.position.set(s*(CW/2-1), -CT/2, (COUCH_Z_MAX+COUCH_Z_MIN)/2); R.couchGrp.add(rl); }
       scene.add(R.couchGrp);
 
-      // Patient
       R.patGrp = new THREE.Group();
       R.patMesh = new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,32), new THREE.MeshStandardMaterial({ color: 0x22D3EE, transparent: true, opacity: 0.3, roughness: 0.6, side: THREE.DoubleSide }));
       R.patMesh.rotation.x = Math.PI/2; R.patGrp.add(R.patMesh);
@@ -186,7 +186,6 @@ export default function LinacCollisionGuard() {
       R.beamVizGrp = new THREE.Group(); scene.add(R.beamVizGrp);
       R.ghostGrp = new THREE.Group(); scene.add(R.ghostGrp);
 
-      // Iso marker
       scene.add(new THREE.Mesh(new THREE.SphereGeometry(2.5, 16, 16), new THREE.MeshBasicMaterial({ color: 0xFACC15 })));
       for (const ax of ["x","y","z"]) { const p=[new THREE.Vector3(), new THREE.Vector3()]; p[0][ax]=-7; p[1][ax]=7; scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(p), new THREE.LineBasicMaterial({ color: 0xFACC15, transparent: true, opacity: 0.4 }))); }
 
@@ -210,13 +209,14 @@ export default function LinacCollisionGuard() {
   /* ── UPDATE COUCH/PATIENT POS ── */
   useEffect(() => {
     if (!ready) return; const R = S.current.refs;
-    const ytop = -C_YOFF + iso.vert, cz = -iso.lng;
-    R.couchGrp.position.set(iso.lat, ytop - CT/2, cz); R.couchGrp.rotation.y = 0;
-    if (patient.show && patient.len > 0) {
+    const ytop = -C_YOFF + parseF(iso.vert), cz = -parseF(iso.lng);
+    R.couchGrp.position.set(parseF(iso.lat), ytop - CT/2, cz); R.couchGrp.rotation.y = 0;
+    const pLen = parseF(patient.len), pRx = parseF(patient.rx), pRy = parseF(patient.ry);
+    if (patient.show && pLen > 0) {
       R.patGrp.visible = true;
-      R.patMesh.scale.set(patient.rx, patient.len, patient.ry);
-      R.patWire.scale.set(patient.rx*1.01, patient.len*1.01, patient.ry*1.01);
-      R.patGrp.position.set(iso.lat, ytop + patient.ry, cz + (COUCH_Z_MIN + patient.len/2));
+      R.patMesh.scale.set(pRx, pLen, pRy);
+      R.patWire.scale.set(pRx*1.01, pLen*1.01, pRy*1.01);
+      R.patGrp.position.set(parseF(iso.lat), ytop + pRy, cz + (COUCH_Z_MIN + pLen/2));
       R.patGrp.rotation.y = 0;
     } else R.patGrp.visible = false;
   }, [ready, iso, patient]);
@@ -229,15 +229,15 @@ export default function LinacCollisionGuard() {
     clearGrp(R.beamVizGrp); clearGrp(R.ghostGrp);
     R.gantryGrp.rotation.z = 0;
 
-    const ytop = -C_YOFF + iso.vert, cz = -iso.lng;
+    const ytop = -C_YOFF + parseF(iso.vert), cz = -parseF(iso.lng);
     const items = mode === "static" ? beams : arcs;
     const fS = 15;
 
     const uniqueAngles = new Map();
-    items.forEach((it, i) => { const rm = it.rm || 0; if (!uniqueAngles.has(rm)) uniqueAngles.set(rm, i); });
+    items.forEach((it, i) => { const rm = parseF(it.rm); if (!uniqueAngles.has(rm)) uniqueAngles.set(rm, i); });
 
     R.couchGrp.visible = uniqueAngles.has(0);
-    R.patGrp.visible = patient.show && patient.len > 0 && uniqueAngles.has(0);
+    R.patGrp.visible = patient.show && parseF(patient.len) > 0 && uniqueAngles.has(0);
 
     uniqueAngles.forEach((firstIdx, rm) => {
       if (rm === 0) return;
@@ -251,17 +251,18 @@ export default function LinacCollisionGuard() {
         new THREE.LineBasicMaterial({ color: col.hex, transparent: true, opacity: 0.4 }));
       ge.position.z = gc.position.z; g.add(ge);
 
-      if (patient.show && patient.len > 0) {
+      if (patient.show && parseF(patient.len) > 0) {
+        const pLen = parseF(patient.len), pRx = parseF(patient.rx), pRy = parseF(patient.ry);
         const gp = new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,24),
           new THREE.MeshStandardMaterial({ color: col.hex, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false }));
-        gp.rotation.x = Math.PI/2; gp.scale.set(patient.rx, patient.len, patient.ry);
-        gp.position.set(0, patient.ry + CT/2, COUCH_Z_MIN + patient.len/2); g.add(gp);
+        gp.rotation.x = Math.PI/2; gp.scale.set(pRx, pLen, pRy);
+        gp.position.set(0, pRy + CT/2, COUCH_Z_MIN + pLen/2); g.add(gp);
         const gpw = new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,12),
           new THREE.MeshBasicMaterial({ color: col.hex, wireframe: true, transparent: true, opacity: 0.2 }));
-        gpw.rotation.x = Math.PI/2; gpw.scale.set(patient.rx*1.01, patient.len*1.01, patient.ry*1.01);
+        gpw.rotation.x = Math.PI/2; gpw.scale.set(pRx*1.01, pLen*1.01, pRy*1.01);
         gpw.position.copy(gp.position); g.add(gpw);
       }
-      g.position.set(iso.lat, ytop - CT/2, cz); g.rotation.y = rm * Math.PI / 180;
+      g.position.set(parseF(iso.lat), ytop - CT/2, cz); g.rotation.y = rm * Math.PI / 180;
       R.ghostGrp.add(g);
     });
 
@@ -272,7 +273,7 @@ export default function LinacCollisionGuard() {
         const res = results[i];
         const st = res ? res.st : "ok";
         const col = st === "col" ? COL_RED : st === "warn" ? COL_WARN : baseCol;
-        const rad = b.g * Math.PI / 180;
+        const rad = parseF(b.g) * Math.PI / 180;
         const lineOp = isAct ? 1.0 : st !== "ok" ? 0.75 : 0.45;
         const fillOp = isAct ? 0.18 : st === "col" ? 0.14 : 0.05;
 
@@ -313,11 +314,12 @@ export default function LinacCollisionGuard() {
         const st = res ? res.st : "ok";
         const col = st === "col" ? COL_RED : st === "warn" ? COL_WARN : baseCol;
         const steps = 80;
-        const span = ((a.e - a.s) % 360 + 360) % 360 || 360;
+        const start = parseF(a.s), end = parseF(a.e);
+        const span = ((end - start) % 360 + 360) % 360 || 360;
 
         const arcPts = [];
         for (let f = 0; f <= steps; f++) {
-          const deg = a.s + span * (f / steps);
+          const deg = start + span * (f / steps);
           const rad = deg * Math.PI / 180;
           arcPts.push(new THREE.Vector3(SAD * Math.sin(rad), SAD * Math.cos(rad), 0));
         }
@@ -350,15 +352,6 @@ export default function LinacCollisionGuard() {
             new THREE.MeshBasicMaterial({ color: col.hex })).translateX(p.x).translateY(p.y));
         });
 
-        const sRad = a.s * Math.PI / 180;
-        const pF = 11;
-        const pyE = [[0,SAD,0,pF,0,pF],[0,SAD,0,-pF,0,pF],[0,SAD,0,-pF,0,-pF],[0,SAD,0,pF,0,-pF],
-          [pF,0,pF,-pF,0,pF],[-pF,0,pF,-pF,0,-pF],[-pF,0,-pF,pF,0,-pF],[pF,0,-pF,pF,0,pF]];
-        const pyP = []; pyE.forEach(([x1,y1,z1,x2,y2,z2])=>{pyP.push(new THREE.Vector3(x1,y1,z1), new THREE.Vector3(x2,y2,z2));});
-        const pyL = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pyP),
-          new THREE.LineBasicMaterial({ color: col.hex, transparent: true, opacity: isAct ? 0.5 : 0.15 }));
-        pyL.rotation.z = sRad; R.beamVizGrp.add(pyL);
-
         if (st !== "ok") {
           const mp = arcPts[Math.floor(steps/2)];
           const rg = new THREE.Mesh(new THREE.TorusGeometry(7, 1.2, 8, 32),
@@ -381,11 +374,13 @@ export default function LinacCollisionGuard() {
   /* ── FIELD MANAGEMENT ── */
   const addBeam = () => setBeams([...beams, { id: nextId.current++, g: 0, rm: 0 }]);
   const removeBeam = i => { setBeams(beams.filter((_,idx)=>idx!==i)); if(activeField===i)setActiveField(null); };
-  const updateBeam = (i, key, val) => { const v = key==="rm" ? clamp(val, LIMITS.rm.min, LIMITS.rm.max) : val; const n=[...beams]; n[i]={...n[i],[key]:v}; setBeams(n); };
+  const updateBeam = (i, key, val) => { const n=[...beams]; n[i][key]=val; setBeams(n); };
+  const blurBeam = (i, key, val) => { let v = parseF(val); if(key==="rm") v = clamp(v, LIMITS.rm.min, LIMITS.rm.max); const n=[...beams]; n[i][key]=v; setBeams(n); };
+  
   const addArc = () => setArcs([...arcs, { id: nextId.current++, s: 181, e: 179, rm: 0 }]);
   const removeArc = i => { setArcs(arcs.filter((_,idx)=>idx!==i)); if(activeField===i)setActiveField(null); };
-  const updateArc = (i, key, val) => { const v = key==="rm" ? clamp(val, LIMITS.rm.min, LIMITS.rm.max) : val; const n=[...arcs]; n[i]={...n[i],[key]:v}; setArcs(n); };
-  const updateIso = (key, val) => setIso({ ...iso, [key]: clamp(val, LIMITS[key].min, LIMITS[key].max) });
+  const updateArc = (i, key, val) => { const n=[...arcs]; n[i][key]=val; setArcs(n); };
+  const blurArc = (i, key, val) => { let v = parseF(val); if(key==="rm") v = clamp(v, LIMITS.rm.min, LIMITS.rm.max); const n=[...arcs]; n[i][key]=v; setArcs(n); };
 
   const stColor = st => st === "col" ? "#EF4444" : st === "warn" ? "#F59E0B" : "#10B981";
   const stLabel = st => st === "col" ? "COLISÃO" : st === "warn" ? "ATENÇÃO" : "LIVRE";
@@ -394,13 +389,48 @@ export default function LinacCollisionGuard() {
   const sLbl = { fontSize:10, color:"#64748B", fontWeight:600, letterSpacing:"0.5px", marginBottom:3, display:"block" };
 
   return (
-    <div style={{ display:"flex", height:"100vh", background:"#080C14", fontFamily:"'Segoe UI',system-ui,sans-serif", color:"#E2E8F0", overflow:"hidden", position:"relative" }}>
+    <div style={{ display:"flex", flexDirection: isMobile ? "column" : "row", height:"100vh", background:"#080C14", fontFamily:"'Segoe UI',system-ui,sans-serif", color:"#E2E8F0", overflow:"hidden", position:"relative" }}>
       
-      {/* SIDEBAR */}
-      <div style={{ width:370, minWidth:370, display:"flex", flexDirection:"column", borderRight:"1px solid #1E293B", background:"#0D1117" }}>
+      {/* VIEWPORT (Moves to Top on Mobile) */}
+      <div ref={mountRef} style={{ height: isMobile ? "45vh" : "100vh", flex: isMobile ? "none" : 1, position:"relative", cursor:"grab" }}
+        onPointerDown={onMD} onPointerMove={onMM} onPointerUp={onMU} onPointerLeave={onMU} onWheel={onW}
+        onTouchStart={e => onMD({clientX: e.touches[0].clientX, clientY: e.touches[0].clientY})}
+        onTouchMove={e => onMM({clientX: e.touches[0].clientX, clientY: e.touches[0].clientY})}
+        onTouchEnd={onMU}>
+        
+        <div style={{ position:"absolute", bottom:14, left:14, fontSize:10, color:"#334155", display:"flex", gap:14, pointerEvents:"none" }}>
+          <span>Arrastar: orbitar</span><span>Scroll: zoom</span><span>SAD: {SAD}cm</span></div>
+
+        {activeField!==null && (() => {
+          const list = mode==="static"?beams:arcs;
+          if (!list[activeField]) return null;
+          return <div style={{ position:"absolute", top:14, left:14, padding:"6px 14px", borderRadius:6,
+            background:"rgba(13,17,23,0.9)", border:`1px solid ${FIELD_COLORS[activeField%FIELD_COLORS.length].css}40`,
+            fontSize:12, fontWeight:700, color:FIELD_COLORS[activeField%FIELD_COLORS.length].css, pointerEvents:"none" }}>
+            {mode==="static"?`Campo ${list[activeField].id}`:`Arco ${list[activeField].id}`}</div>;
+        })()}
+
+        {(()=>{
+          const items = mode==="static"?beams:arcs;
+          const angles = new Map(); items.forEach((it,i)=>{const rm=parseF(it.rm);if(!angles.has(rm))angles.set(rm,i);});
+          if(angles.size<=1 && angles.has(0)) return null;
+          return <div style={{ position:"absolute", top: isMobile ? 50 : 14, right:14, pointerEvents:"none",
+            background:"rgba(13,17,23,0.9)", padding:"8px 12px", borderRadius:6, border:"1px solid #1E293B" }}>
+            <div style={{ fontSize:9, fontWeight:700, color:"#475569", letterSpacing:"1px", marginBottom:4 }}>POSIÇÕES MESA</div>
+            {[...angles.entries()].map(([angle,idx])=>(
+              <div key={angle} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
+                <div style={{ width:10, height:3, borderRadius:1, background:angle===0?"#475569":FIELD_COLORS[idx%FIELD_COLORS.length].css }}/>
+                <span style={{ fontSize:10, color:angle===0?"#94A3B8":FIELD_COLORS[idx%FIELD_COLORS.length].css }}>{angle}°</span>
+              </div>))}
+          </div>;
+        })()}
+      </div>
+
+      {/* SIDEBAR (Bottom on Mobile, Right on Desktop) */}
+      <div style={{ width: isMobile ? "100%" : 370, minWidth: isMobile ? "100%" : 370, height: isMobile ? "55vh" : "100vh", display:"flex", flexDirection:"column", borderLeft: isMobile ? "none" : "1px solid #1E293B", borderTop: isMobile ? "1px solid #1E293B" : "none", background:"#0D1117" }}>
         
         {/* ── HEADER ASSINADO ── */}
-        <div style={{ padding:"14px 18px", borderBottom:"1px solid #1E293B", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ padding:"14px 18px", borderBottom:"1px solid #1E293B", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink: 0 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <div style={{ width:32, height:32, borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", background:"linear-gradient(135deg,#3B82F6,#1D4ED8)", fontSize:16 }}>⚡</div>
             <div>
@@ -414,7 +444,7 @@ export default function LinacCollisionGuard() {
           </div>
         </div>
 
-        <div style={{ display:"flex", padding:"10px 14px", gap:6, borderBottom:"1px solid #1E293B" }}>
+        <div style={{ display:"flex", padding:"10px 14px", gap:6, borderBottom:"1px solid #1E293B", flexShrink: 0 }}>
           {[["static","IMRT / Estático"],["arc","VMAT / Arcos"]].map(([m,lb])=>(
             <button key={m} onClick={()=>{setMode(m);setActiveField(null);}}
               style={{ flex:1, padding:"8px 0", fontSize:11, fontWeight:700, letterSpacing:"0.5px",
@@ -425,8 +455,7 @@ export default function LinacCollisionGuard() {
         <div style={{ flex:1, overflowY:"auto", padding:"12px 14px" }}>
 
           {/* Global banner */}
-          <div style={{ padding:"10px 14px", borderRadius:8, marginBottom:14, textAlign:"center",
-            border:`1px solid ${stColor(worstStatus)}50`, background:`${stColor(worstStatus)}0A` }}>
+          <div style={{ padding:"10px 14px", borderRadius:8, marginBottom:14, textAlign:"center", border:`1px solid ${stColor(worstStatus)}50`, background:`${stColor(worstStatus)}0A` }}>
             <div style={{ fontSize:14, fontWeight:800, color:stColor(worstStatus), marginBottom:2 }}>
               {stIcon(worstStatus)} {worstStatus==="ok"?"PLANO LIVRE":worstStatus==="warn"?"FOLGA REDUZIDA":"COLISÃO DETECTADA"}
             </div>
@@ -436,17 +465,35 @@ export default function LinacCollisionGuard() {
             </div>
           </div>
 
-          {/* Isocenter */}
+          {/* Isocenter com Sliders Otimizados */}
           <div style={{ marginBottom:14 }}>
-            <div style={{ fontSize:10, fontWeight:700, color:"#94A3B8", letterSpacing:"1px", marginBottom:8, display:"flex", alignItems:"center", gap:6 }}>
-              <span style={{ color:"#FACC15" }}>◉</span> ISOCENTRO (cm)
+            <div style={{ fontSize:10, fontWeight:700, color:"#94A3B8", letterSpacing:"1px", marginBottom:12, display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{ color:"#FACC15" }}>◉</span> ISOCENTRO E MESA
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+            <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
               {["lat","vert","lng"].map(k=>(
-                <div key={k}><label style={sLbl}>{LIMITS[k].label}<span style={{color:"#334155",fontSize:8}}> [{LIMITS[k].min},{LIMITS[k].max}]</span></label>
-                <input type="number" value={iso[k]} step={0.5} onFocus={e=>e.target.select()} onChange={e=>updateIso(k,+e.target.value)} style={sInput}/></div>))}
+                <div key={k} style={{ padding: "8px 12px", background: "#0F172A", borderRadius: 8, border: "1px solid #1E293B" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                    <label style={{...sLbl, marginBottom:0}}>{LIMITS[k].label} <span style={{fontSize:9, color:"#475569"}}>cm</span></label>
+                    {/* Validação ao perder o foco (permite digitar negativos livremente) */}
+                    <input type="number" value={iso[k]} step={0.5} onFocus={e=>e.target.select()}
+                      onChange={e => setIso({...iso, [k]: e.target.value})}
+                      onBlur={e => {
+                        let num = parseF(e.target.value);
+                        setIso({...iso, [k]: clamp(num, LIMITS[k].min, LIMITS[k].max)});
+                      }}
+                      style={{...sInput, width:70, padding:"4px 6px"}}/>
+                  </div>
+                  {/* Slider nativo restaurado */}
+                  <input type="range" min={LIMITS[k].min} max={LIMITS[k].max} step={0.5} value={parseF(iso[k])}
+                    onChange={e => setIso({...iso, [k]: parseFloat(e.target.value)})}
+                    style={{ width:"100%", cursor:"grab", accentColor: "#3B82F6" }} />
+                </div>
+              ))}
             </div>
           </div>
+
+          <div style={{ height:1, background:"#1E293B", margin:"16px 0" }}/>
 
           {/* Patient */}
           <div style={{ marginBottom:14, padding:10, background:"#0F172A", borderRadius:8, border:"1px solid #1E293B" }}>
@@ -459,8 +506,10 @@ export default function LinacCollisionGuard() {
             </div>
             {patient.show && <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
               {[["rx","RAIO X"],["ry","RAIO Y"],["len","COMPR."]].map(([k,l])=>(
-                <div key={k}><label style={sLbl}>{l} (cm)</label>
-                <input type="number" value={patient[k]} step={1} onFocus={e=>e.target.select()} onChange={e=>setPatient({...patient,[k]:Math.max(0,+e.target.value)})} style={sInput}/></div>))}
+                <div key={k}><label style={sLbl}>{l}</label>
+                <input type="number" value={patient[k]} step={1} onFocus={e=>e.target.select()}
+                  onChange={e=>setPatient({...patient, [k]: e.target.value})}
+                  onBlur={e=>setPatient({...patient, [k]: Math.max(0, parseF(e.target.value))})} style={sInput}/></div>))}
             </div>}
           </div>
 
@@ -482,16 +531,15 @@ export default function LinacCollisionGuard() {
                 boxShadow:st==="col"?"0 0 16px rgba(239,68,68,0.15)":st==="warn"?"0 0 10px rgba(245,158,11,0.1)":"none" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                    <div style={{ width:10, height:10, borderRadius:"50%", background:st!=="ok"?stColor(st):col.css,
-                      boxShadow:st!=="ok"?`0 0 8px ${stColor(st)}`:isAct?`0 0 6px ${col.css}`:"none" }}/>
+                    <div style={{ width:10, height:10, borderRadius:"50%", background:st!=="ok"?stColor(st):col.css, boxShadow:st!=="ok"?`0 0 8px ${stColor(st)}`:isAct?`0 0 6px ${col.css}`:"none" }}/>
                     <span style={{ fontSize:12, fontWeight:700, color:"#CBD5E1" }}>Campo {b.id}</span>
                     <span style={{ fontSize:9, fontWeight:800, padding:"2px 6px", borderRadius:3, background:`${stColor(st)}20`, color:stColor(st) }}>{stLabel(st)}</span>
                   </div>
                   {beams.length>1 && <button onClick={e=>{e.stopPropagation();removeBeam(i);}} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:14, padding:"0 4px" }}>×</button>}
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-                  <div><label style={sLbl}>GANTRY (°)</label><input type="number" value={b.g} onClick={e=>e.stopPropagation()} onFocus={e=>e.target.select()} onChange={e=>updateBeam(i,"g",+e.target.value)} style={sInput}/></div>
-                  <div><label style={sLbl}>MESA (°)</label><input type="number" value={b.rm} onClick={e=>e.stopPropagation()} onFocus={e=>e.target.select()} onChange={e=>updateBeam(i,"rm",+e.target.value)} style={sInput}/></div>
+                  <div><label style={sLbl}>GANTRY (°)</label><input type="number" value={b.g} onClick={e=>e.stopPropagation()} onFocus={e=>e.target.select()} onChange={e=>updateBeam(i,"g",e.target.value)} onBlur={e=>blurBeam(i,"g",e.target.value)} style={sInput}/></div>
+                  <div><label style={sLbl}>MESA (°)</label><input type="number" value={b.rm} onClick={e=>e.stopPropagation()} onFocus={e=>e.target.select()} onChange={e=>updateBeam(i,"rm",e.target.value)} onBlur={e=>blurBeam(i,"rm",e.target.value)} style={sInput}/></div>
                 </div>
                 {res && <div style={{ marginTop:6, fontSize:10, color:"#64748B", display:"flex", gap:8 }}>
                   <span>Folga: <b style={{ color:stColor(st), fontFamily:"monospace" }}>{res.dm.toFixed(1)}cm</b></span>
@@ -512,8 +560,7 @@ export default function LinacCollisionGuard() {
                 boxShadow:st==="col"?"0 0 16px rgba(239,68,68,0.15)":st==="warn"?"0 0 10px rgba(245,158,11,0.1)":"none" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                    <div style={{ width:10, height:10, borderRadius:"50%", background:st!=="ok"?stColor(st):col.css,
-                      boxShadow:st!=="ok"?`0 0 8px ${stColor(st)}`:isAct?`0 0 6px ${col.css}`:"none" }}/>
+                    <div style={{ width:10, height:10, borderRadius:"50%", background:st!=="ok"?stColor(st):col.css, boxShadow:st!=="ok"?`0 0 8px ${stColor(st)}`:isAct?`0 0 6px ${col.css}`:"none" }}/>
                     <span style={{ fontSize:12, fontWeight:700, color:"#CBD5E1" }}>Arco {a.id}</span>
                     <span style={{ fontSize:9, fontWeight:800, padding:"2px 6px", borderRadius:3, background:`${stColor(st)}20`, color:stColor(st) }}>{stLabel(st)}</span>
                   </div>
@@ -522,7 +569,7 @@ export default function LinacCollisionGuard() {
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
                   {[["s","INÍCIO (°)"],["e","FIM (°)"],["rm","MESA (°)"]].map(([k,l])=>(
                     <div key={k}><label style={sLbl}>{l}</label>
-                    <input type="number" value={a[k]} onClick={e=>e.stopPropagation()} onFocus={e=>e.target.select()} onChange={e=>updateArc(i,k,+e.target.value)} style={sInput}/></div>))}
+                    <input type="number" value={a[k]} onClick={e=>e.stopPropagation()} onFocus={e=>e.target.select()} onChange={e=>updateArc(i,k,e.target.value)} onBlur={e=>blurArc(i,k,e.target.value)} style={sInput}/></div>))}
                 </div>
                 {res && <div style={{ marginTop:6, fontSize:10, color:"#64748B", display:"flex", gap:8 }}>
                   <span>Folga: <b style={{ color:stColor(st), fontFamily:"monospace" }}>{res.dm.toFixed(1)}cm</b></span>
@@ -537,37 +584,6 @@ export default function LinacCollisionGuard() {
               border:"1px dashed #334155", borderRadius:8, cursor:"pointer", background:"transparent", color:"#64748B" }}>
             + Adicionar {mode==="static"?"Campo":"Arco"}</button>
         </div>
-      </div>
-
-      {/* VIEWPORT */}
-      <div ref={mountRef} style={{ flex:1, position:"relative", cursor:"grab" }}
-        onPointerDown={onMD} onPointerMove={onMM} onPointerUp={onMU} onPointerLeave={onMU} onWheel={onW}>
-        <div style={{ position:"absolute", bottom:14, left:14, fontSize:10, color:"#334155", display:"flex", gap:14, pointerEvents:"none" }}>
-          <span>Arrastar: orbitar</span><span>Scroll: zoom</span><span>SAD: {SAD}cm</span></div>
-
-        {activeField!==null && (() => {
-          const list = mode==="static"?beams:arcs;
-          if (!list[activeField]) return null;
-          return <div style={{ position:"absolute", top:14, left:14, padding:"6px 14px", borderRadius:6,
-            background:"rgba(13,17,23,0.9)", border:`1px solid ${FIELD_COLORS[activeField%FIELD_COLORS.length].css}40`,
-            fontSize:12, fontWeight:700, color:FIELD_COLORS[activeField%FIELD_COLORS.length].css, pointerEvents:"none" }}>
-            {mode==="static"?`Campo ${list[activeField].id}`:`Arco ${list[activeField].id}`}</div>;
-        })()}
-
-        {(()=>{
-          const items = mode==="static"?beams:arcs;
-          const angles = new Map(); items.forEach((it,i)=>{const rm=it.rm||0;if(!angles.has(rm))angles.set(rm,i);});
-          if(angles.size<=1 && angles.has(0)) return null;
-          return <div style={{ position:"absolute", top:14, right:14, pointerEvents:"none",
-            background:"rgba(13,17,23,0.9)", padding:"8px 12px", borderRadius:6, border:"1px solid #1E293B" }}>
-            <div style={{ fontSize:9, fontWeight:700, color:"#475569", letterSpacing:"1px", marginBottom:4 }}>POSIÇÕES MESA</div>
-            {[...angles.entries()].map(([angle,idx])=>(
-              <div key={angle} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
-                <div style={{ width:10, height:3, borderRadius:1, background:angle===0?"#475569":FIELD_COLORS[idx%FIELD_COLORS.length].css }}/>
-                <span style={{ fontSize:10, color:angle===0?"#94A3B8":FIELD_COLORS[idx%FIELD_COLORS.length].css }}>{angle}°</span>
-              </div>))}
-          </div>;
-        })()}
       </div>
     </div>
   );
